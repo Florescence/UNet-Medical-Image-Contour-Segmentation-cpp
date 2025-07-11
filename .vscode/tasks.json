@@ -1,0 +1,37 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "build-opencv",
+            "type": "shell",
+            "command": "cl.exe",
+            "args": [
+                "/utf-8",
+                "/std:c++17",
+                "/MD",
+                "/Fe:\"${workspaceFolder}/bin/predict.exe\"", //修改不同文件
+                "/Zi",
+                "/EHsc",
+                "/I", "\"D:/Program Files/libtorch/include\"",
+                "/I", "\"D:/Program Files/libtorch/include/torch/csrc/api/include\"",
+                "/I", "\"D:/PROGRA~1/OpenCV4.7/install_x64_release/include\"",
+                "/I", "\"${workspaceFolder}/include\"",
+                "\"${workspaceFolder}/src/predict.cpp\"", //修改不同文件
+                "/link",
+                "/LIBPATH:\"D:/Program Files/libtorch/lib\"",
+                "/LIBPATH:\"D:/PROGRA~1/OpenCV4.7/install_x64_release/x64/vc16/staticlib\"",
+                "/LIBPATH:\"C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.44.35207/lib/x64\"",
+                "/LIBPATH:\"C:/Program Files (x86)/Windows Kits/10/Lib/10.0.22621.0/um/x64\"",
+                "/LIBPATH:\"C:/Program Files (x86)/Windows Kits/10/Lib/10.0.22621.0/ucrt/x64\"",
+                "D:/Program Files/libtorch/lib/*.lib",
+                "D:/PROGRA~1/OpenCV4.7/install_x64_release/x64/vc16/staticlib/*.lib"
+
+            ],
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            },
+            "problemMatcher": ["$msCompile"]
+        }
+    ]
+}

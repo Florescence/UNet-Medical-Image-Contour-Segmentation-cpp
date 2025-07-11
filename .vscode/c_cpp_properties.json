@@ -1,0 +1,27 @@
+{
+    "configurations": [
+        {
+            "name": "MSVC",
+            "includePath": [
+                "${workspaceFolder}/**",
+                "${workspaceFolder}/include",
+                "D:/Program Files/libtorch/include",
+                "D:/Program Files/libtorch/include/torch/csrc/api/include",
+                "D:/Program Files/OpenCV4.7/install_x64_release/include",
+                "D:/Program Files/OpenCV4.7/install_x64_release/include/opencv2",
+                "C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.44.35207/include",
+                "C:/Program Files (x86)/Windows Kits/10/Include/10.0.22621.0/ucrt"
+            ],
+            "defines": [
+                "_DEBUG",
+                "UNICODE",
+                "_UNICODE"
+            ],
+            "compilerPath": "C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.44.35207/bin/Hostx64/x64/cl.exe",
+            "cStandard": "c17",
+            "cppStandard": "c++17",
+            "intelliSenseMode": "windows-msvc-x64"
+        }
+    ],
+    "version": 4
+}

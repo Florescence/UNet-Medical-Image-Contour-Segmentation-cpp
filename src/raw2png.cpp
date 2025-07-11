@@ -1,8 +1,9 @@
+#include "raw2png.h"
 #include <iostream>
 #include <fstream>
 #include <vector>
 #include <filesystem>
-#include <opencv2/opencv.hpp>
+#include <stdexcept>
 
 namespace fs = std::filesystem;
 
@@ -75,16 +76,16 @@ bool raw_to_png(const std::string& raw_path, const std::string& output_path, int
     }
 }
 
-// 主函数（硬编码参数测试）
-int main() {
-    // 硬编码测试参数（根据实际需求修改）
-    const std::string raw_path = "test.raw";       // 输入RAW文件路径
-    const std::string output_path = "output/test.png"; // 输出PNG路径
-    const int width = 4267;                        // 图像宽度
-    const int height = 4267;                       // 图像高度
+// // 主函数（硬编码参数测试）
+// int main() {
+//     // 硬编码测试参数（根据实际需求修改）
+//     const std::string raw_path = "test.raw";       // 输入RAW文件路径
+//     const std::string output_path = "output/test.png"; // 输出PNG路径
+//     const int width = 4267;                        // 图像宽度
+//     const int height = 4267;                       // 图像高度
 
-    // 调用处理函数
-    raw_to_png(raw_path, output_path, width, height);
+//     // 调用处理函数
+//     raw_to_png(raw_path, output_path, width, height);
     
-    return 0;
-}
+//     return 0;
+// }

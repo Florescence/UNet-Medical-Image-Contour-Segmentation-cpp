@@ -9,14 +9,21 @@
                 "/utf-8",
                 "/std:c++17",
                 "/MD",
-                "/Fe:\"${workspaceFolder}/bin/predict.exe\"", //修改不同文件
+                "/Fe:\"${workspaceFolder}/bin/seg_main.exe\"", //修改不同文件
                 "/Zi",
                 "/EHsc",
                 "/I", "\"D:/Program Files/libtorch/include\"",
                 "/I", "\"D:/Program Files/libtorch/include/torch/csrc/api/include\"",
                 "/I", "\"D:/PROGRA~1/OpenCV4.7/install_x64_release/include\"",
+                "/I", "C:/Users/tingsheng.cai/VSCodeProjects/UNet-Medical-Image-Contour-Segmentation/include",
+                "/I", "C:/Users/tingsheng.cai/VSCodeProjects/UNet-Medical-Image-Contour-Segmentation/src/seg_main.cpp",
+                "/I", "C:/Users/tingsheng.cai/VSCodeProjects/UNet-Medical-Image-Contour-Segmentation/src/raw2png.cpp",
+                "/I", "C:/Users/tingsheng.cai/VSCodeProjects/UNet-Medical-Image-Contour-Segmentation/src/png_normalize.cpp",
+                "/I", "C:/Users/tingsheng.cai/VSCodeProjects/UNet-Medical-Image-Contour-Segmentation/src/predict.cpp",
+                "/I", "C:/Users/tingsheng.cai/VSCodeProjects/UNet-Medical-Image-Contour-Segmentation/src/png_denormalize.cpp",
+                "/I", "C:/Users/tingsheng.cai/VSCodeProjects/UNet-Medical-Image-Contour-Segmentation/src/mask2polygon.cpp",
                 "/I", "\"${workspaceFolder}/include\"",
-                "\"${workspaceFolder}/src/predict.cpp\"", //修改不同文件
+                "\"${workspaceFolder}/src/seg_main.cpp\"", //修改不同文件
                 "/link",
                 "/LIBPATH:\"D:/Program Files/libtorch/lib\"",
                 "/LIBPATH:\"D:/PROGRA~1/OpenCV4.7/install_x64_release/x64/vc16/staticlib\"",

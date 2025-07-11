@@ -1,7 +1,5 @@
+#include "predict.h"
 #include <iostream>
-#include <opencv2/opencv.hpp>
-#include <torch/torch.h>
-#include <torch/script.h>
 #include <c10/util/Exception.h>
 #include "post_process.cpp"  // 包含后处理函数
 
@@ -13,18 +11,22 @@ const int NUM_CLASSES = 3;       // 多分类类别数（0/1/2）
  * 图像预处理：转为Tensor并标准化（对应Python的BasicDataset.preprocess）
  */
 torch::Tensor preprocess_image(const cv::Mat& gray_img) {
-    // 转换为float类型并归一化到[0,1]
+    // 转换为float类型
     cv::Mat float_img;
-    gray_img.convertTo(float_img, CV_32F, 1.0 / 255.0);
+    gray_img.convertTo(float_img, CV_32F, 1.0 / 255.0, 0.0);
+    float_img = float_img.clone();
+
+    // std::cout << "\n===== float_img Convert Validation =====" << std::endl;
+    // double float_min, float_max;
+    // cv::minMaxLoc(float_img, &float_min, &float_max);
+    // std::cout << "float_img Value Range: [" << float_min << ", " << float_max << "] (Should be same with gray_img)" << std::endl;
 
     // 转换为Tensor：[H, W] -> [1, C, H, W]（添加批次和通道维度）
     torch::Tensor tensor = torch::from_blob(
         float_img.data,
         {1, INPUT_CHANNELS, gray_img.rows, gray_img.cols},
         torch::kFloat32
-    );
-
-    tensor = tensor.contiguous();
+    ).clone();
 
     return tensor;
 }
@@ -33,10 +35,10 @@ torch::Tensor preprocess_image(const cv::Mat& gray_img) {
  * 模型预测：加载TorchScript模型并执行推理
  */
 cv::Mat predict_mask(torch::jit::script::Module& model, const cv::Mat& gray_img, torch::Device device) {
-    // 预处理图像
+    // 预处理图像对齐模型输入
     torch::Tensor input_tensor = preprocess_image(gray_img).to(device);
 
-    // 验证张量是否有效
+    // 验证张量有效性
     if (!input_tensor.defined()) {
         throw std::runtime_error("Input tensor is undefined (invalid data)");
     }
@@ -46,28 +48,23 @@ cv::Mat predict_mask(torch::jit::script::Module& model, const cv::Mat& gray_img,
     if (torch::isnan(input_tensor).any().item<bool>()) {
         throw std::runtime_error("Input tensor contains NaN values");
     }
-    std::cout << "Input tensor shape: " << input_tensor.sizes() << std::endl;  // 应输出[1,1,512,512]
 
-    // 构建输入
+    // 模型推理
     std::vector<torch::jit::IValue> inputs;
     inputs.push_back(input_tensor);
-
-    // 模型推理（关闭梯度计算）
     torch::NoGradGuard no_grad;
     torch::Tensor output = model.forward(inputs).toTensor();
 
-    // 验证输出尺寸是否与原图一致（可选，调试用）
-    if (output.size(2) != gray_img.rows || output.size(3) != gray_img.cols) {
-        std::cerr << "Warning：Input Size Unmatch with Output Size！" 
-                  << "Output Size: " << output.size(3) << "x" << output.size(2) 
-                  << " Input Size: " << gray_img.cols << "x" << gray_img.rows << std::endl;
-    }
+    torch::Tensor pred_indices = output.argmax(1).squeeze(0).to(torch::kCPU).to(torch::kInt64);
 
-    // 取概率最大的类别（[B, C, H, W] -> [H, W]）
-    torch::Tensor pred_indices = output.argmax(1).squeeze().to(torch::kCPU).to(torch::kUInt8);
+    // 截断到[0,2]并转为uint8
+    pred_indices = pred_indices.clamp(0, 2).to(torch::kUInt8);
+    
+    // 转换为cv::Mat
+    cv::Mat pred_mask(gray_img.rows, gray_img.cols, CV_8UC1);
+    std::memcpy(pred_mask.data, pred_indices.data_ptr(), pred_indices.numel() * sizeof(uint8_t));
 
-    // 转换为OpenCV矩阵（值为0/1/2）
-    return cv::Mat(gray_img.rows, gray_img.cols, CV_8UC1, pred_indices.data_ptr()).clone();
+    return pred_mask.clone();
 }
 
 /**
@@ -104,19 +101,17 @@ void predict_single_image(
 
         // 3. 读取输入图像并转为灰度图
         cv::Mat img = cv::imread(input_img_path);
-        // if (img.empty()) {
-        //     throw std::runtime_error("Failed to Read Image: " + input_img_path);
-        // }
-        // cv::Mat gray_img;
-        // cv::cvtColor(img, gray_img, cv::COLOR_BGR2GRAY);  // 转为8位灰度图
-        // std::cout << "Input Image Scale: " << gray_img.cols << "x" << gray_img.rows << std::endl;
-        std::cout << "Input Image Scale: " << img.cols << "x" << img.rows << std::endl;
+        if (img.empty()) {
+            throw std::runtime_error("Failed to Read Image: " + input_img_path);
+        }
+        cv::Mat gray_img;
+        cv::cvtColor(img, gray_img, cv::COLOR_BGR2GRAY);  // 转为8位灰度图
+        std::cout << "Input Image Scale: " << gray_img.cols << "x" << gray_img.rows << std::endl;
 
         // 4. 模型预测
         std::cout << "Prediction In Progress, Generating Raw Mask . . ." << std::endl;
-        // cv::Mat pred_mask = predict_mask(model, gray_img, device);
-        cv::Mat pred_mask = predict_mask(model, img, device);
-
+        cv::Mat pred_mask = predict_mask(model, gray_img, device);
+        
         // 5. 应用后处理
         pred_mask = postprocess_mask(pred_mask);
         std::cout << "Postprocess Applied" << std::endl;
@@ -139,15 +134,15 @@ void predict_single_image(
     }
 }
 
-// 测试主函数（硬编码参数）
-int main() {
-    // 硬编码测试参数（根据实际需求修改）
-    const std::string model_path = "../unet_model.pt";       // TorchScript模型路径
-    const std::string input_img_path = "output/test.png";       // 输入图像路径（需为PNG/JPG）
-    const std::string output_mask_path = "output/test_mask.png";  // 输出掩码路径
+// // 测试主函数（硬编码参数）
+// int main() {
+//     // 硬编码测试参数（根据实际需求修改）
+//     const std::string model_path = "../unet_model.pt";       // TorchScript模型路径
+//     const std::string input_img_path = "output/test.png";       // 输入图像路径（需为PNG/JPG）
+//     const std::string output_mask_path = "output/test_mask.png";  // 输出掩码路径
 
-    // 执行单张图像预测
-    predict_single_image(model_path, input_img_path, output_mask_path);
+//     // 执行单张图像预测
+//     predict_single_image(model_path, input_img_path, output_mask_path);
 
-    return 0;
-}
+//     return 0;
+// }

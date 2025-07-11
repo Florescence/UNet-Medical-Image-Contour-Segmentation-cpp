@@ -1,14 +1,12 @@
+#include "mask2polygon.h"
 #include <iostream>
 #include <fstream>
-#include <vector>
-#include <opencv2/opencv.hpp>
-#include "nlohmann/json.hpp"
 
 using json = nlohmann::json;
 namespace fs = std::filesystem;
 
 // 常量定义
-const std::string JSON_VERSION = "1.0.2.799"; // 与Falcon版本一致
+const std::string JSON_VERSION = "1.0.2.799"; // 须调整与Falcon版本一致
 const cv::Scalar CONTOUR_COLOR = cv::Scalar(0, 0, 255);  // 红色轮廓
 const int CONTOUR_THICKNESS = 4;  // 轮廓线宽
 
@@ -26,7 +24,7 @@ json load_size_json(const std::string& json_path) {
 }
 
 /**
- * 查找原始PNG图像（模仿Python的_find_original_png逻辑）
+ * 查找原始PNG图像
  */
 std::string find_original_png(const std::string& base_name, const std::string& output_dir) {
     // 候选路径列表（优先级从高到低）
@@ -44,7 +42,7 @@ std::string find_original_png(const std::string& base_name, const std::string& o
 }
 
 /**
- * 提取掩码轮廓（对应Python的cv2.findContours）
+ * 提取掩码轮廓
  */
 std::vector<std::vector<cv::Point>> extract_contours(const cv::Mat& mask) {
     cv::Mat binary_mask;
@@ -56,7 +54,7 @@ std::vector<std::vector<cv::Point>> extract_contours(const cv::Mat& mask) {
 }
 
 /**
- * 生成轮廓JSON文件（对应Python的JSON结构）
+ * 生成轮廓JSON文件（对应Falcon的JSON结构）
  */
 void generate_json(const std::vector<std::vector<cv::Point>>& contours,
                   const std::string& json_path,
@@ -179,7 +177,7 @@ void process_single_mask(const std::string& mask_path,
 int main() {
     // 硬编码测试参数（根据实际需求修改）
     const std::string mask_path = "output/test.png";    // 输入掩码路径
-    const std::string output_dir = "output/test.png";            // 输出目录
+    const std::string output_dir = "output";            // 输出目录
     const std::string size_json_path = "output/original_sizes.json";  // 尺寸JSON路径
 
     // 创建输出目录

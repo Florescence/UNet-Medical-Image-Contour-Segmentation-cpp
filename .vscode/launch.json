@@ -5,7 +5,7 @@
             "name": "MSVC - 启动",
             "type": "cppvsdbg",
             "request": "launch",
-            "program": "${workspaceFolder}/bin/predict.exe",
+            "program": "${workspaceFolder}/bin/mask2polygon.exe",
             "args": [],
             "stopAtEntry": false,
             "cwd": "${workspaceFolder}",

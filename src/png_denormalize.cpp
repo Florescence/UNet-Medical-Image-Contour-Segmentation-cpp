@@ -1,7 +1,6 @@
+#include "png_denormalize.h"
 #include <iostream>
 #include <fstream>
-#include <opencv2/opencv.hpp>
-#include "nlohmann/json.hpp"
 
 using json = nlohmann::json;
 namespace fs = std::filesystem;
@@ -103,7 +102,7 @@ void denormalize_single_png(const std::string& input_img_path,
         json sizes_json = load_original_sizes(json_path);
         std::string filename = fs::path(input_img_path).filename().string();
         if (!sizes_json.contains(filename)) {
-            throw std::runtime_error("Cannot Find Initial Scale Info from JSON File" + filename);
+            throw std::runtime_error("Cannot Find Initial Scale Info from JSON File " + filename);
         }
         int orig_width = sizes_json[filename]["width"];
         int orig_height = sizes_json[filename]["height"];
@@ -124,14 +123,14 @@ void denormalize_single_png(const std::string& input_img_path,
 }
 
 // 测试主函数（硬编码参数）
-int main() {
-    // 硬编码测试参数（根据实际需求修改）
-    const std::string input_img_path = "output/test.png";    // 输入归一化图像（512x512）
-    const std::string output_img_path = "output/test.png"; // 输出反归一化图像
-    const std::string json_path = "output/original_sizes.json";    // 原始尺寸JSON路径
+// int main() {
+//     // 硬编码测试参数（根据实际需求修改）
+//     const std::string input_img_path = "output/test.png";    // 输入归一化图像（512x512）
+//     const std::string output_img_path = "output/test.png"; // 输出反归一化图像
+//     const std::string json_path = "output/original_sizes.json";    // 原始尺寸JSON路径
 
-    // 执行单张图像反归一化
-    denormalize_single_png(input_img_path, output_img_path, json_path);
+//     // 执行单张图像反归一化
+//     denormalize_single_png(input_img_path, output_img_path, json_path);
 
-    return 0;
-}
+//     return 0;
+// }

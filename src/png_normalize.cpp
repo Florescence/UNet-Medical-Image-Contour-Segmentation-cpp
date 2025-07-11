@@ -1,7 +1,6 @@
+#include "png_normalize.h"
 #include <iostream>
 #include <fstream>
-#include <opencv2/opencv.hpp>
-#include <nlohmann/json.hpp>
 
 using json = nlohmann::json;
 namespace fs = std::filesystem;
@@ -132,14 +131,14 @@ void normalize_single_png(const std::string& input_path,
 }
 
 // 主函数（硬编码测试参数）
-int main() {
-    // 测试参数（根据实际需求修改）
-    const std::string input_path = "output/test.png"; // 输入单张PNG路径
-    const std::string output_img_path = "output/test.png"; // 输出归一化图片路径
-    const std::string output_json_path = "output/original_sizes.json"; // 输出尺寸JSON路径
+// int main() {
+//     // 测试参数（根据实际需求修改）
+//     const std::string input_path = "output/test.png"; // 输入单张PNG路径
+//     const std::string output_img_path = "output/test.png"; // 输出归一化图片路径
+//     const std::string output_json_path = "output/original_sizes.json"; // 输出尺寸JSON路径
 
-    // 执行归一化
-    normalize_single_png(input_path, output_img_path, output_json_path);
+//     // 执行归一化
+//     normalize_single_png(input_path, output_img_path, output_json_path);
 
-    return 0;
-}
+//     return 0;
+// }

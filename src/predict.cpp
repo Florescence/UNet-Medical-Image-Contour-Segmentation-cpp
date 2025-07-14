@@ -8,147 +8,120 @@
 namespace fs = std::filesystem;
 namespace Predict{
 
-    // 常量定义（与Python版本保持一致）
+// 常量定义（与Python版本保持一致）
 const int INPUT_CHANNELS = 1;    // 输入图像通道数（灰度图）
 const int NUM_CLASSES = 3;       // 多分类类别数（0/1/2）
 
 /**
- * 图像预处理：转为Tensor并标准化（对应Python的BasicDataset.preprocess）
+ * 图像预处理：转为Tensor并标准化（优化版本）
+ * 假设输入已为8位灰度图（由第二步归一化保证）
  */
 torch::Tensor preprocess_image(const cv::Mat& gray_img) {
-    // 转换为float类型
-    cv::Mat float_img;
-    gray_img.convertTo(float_img, CV_32F, 1.0 / 255.0, 0.0);
-    float_img = float_img.clone();
-
-    // std::cout << "\n===== float_img Convert Validation =====" << std::endl;
-    // double float_min, float_max;
-    // cv::minMaxLoc(float_img, &float_min, &float_max);
-    // std::cout << "float_img Value Range: [" << float_min << ", " << float_max << "] (Should be same with gray_img)" << std::endl;
-
-    // 转换为Tensor：[H, W] -> [1, C, H, W]（添加批次和通道维度）
+    // 直接创建Tensor，避免额外内存拷贝（利用OpenCV和PyTorch内存连续性）
     torch::Tensor tensor = torch::from_blob(
-        float_img.data,
+        gray_img.data,
         {1, INPUT_CHANNELS, gray_img.rows, gray_img.cols},
-        torch::kFloat32
-    ).clone();
+        torch::kUInt8
+    ).clone();  // 克隆数据以分离生命周期（确保Tensor不依赖原始cv::Mat）
 
+    // 直接在Tensor上执行归一化（替代OpenCV的convertTo）
+    tensor = tensor.to(torch::kFloat32).div(255.0);
+    
     return tensor;
 }
 
 /**
- * 模型预测：加载TorchScript模型并执行推理
+ * 模型预测：使用预加载的模型执行推理（模型由外部传入）
  */
 cv::Mat predict_mask(torch::jit::script::Module& model, const cv::Mat& gray_img, torch::Device device) {
     // 预处理图像对齐模型输入
     torch::Tensor input_tensor = preprocess_image(gray_img).to(device);
 
-    // 验证张量有效性
-    if (!input_tensor.defined()) {
-        throw std::runtime_error("Input tensor is undefined (invalid data)");
-    }
-    if (input_tensor.numel() == 0) {
-        throw std::runtime_error("Input tensor is empty (invalid size)");
-    }
-    if (torch::isnan(input_tensor).any().item<bool>()) {
-        throw std::runtime_error("Input tensor contains NaN values");
-    }
-
-    // 模型推理
+    // 模型推理（移除冗余的张量验证，假设输入有效）
     std::vector<torch::jit::IValue> inputs;
     inputs.push_back(input_tensor);
     torch::NoGradGuard no_grad;
     torch::Tensor output = model.forward(inputs).toTensor();
 
-    torch::Tensor pred_indices = output.argmax(1).squeeze(0).to(torch::kCPU).to(torch::kInt64);
-
-    // 截断到[0,2]并转为uint8
-    pred_indices = pred_indices.clamp(0, 2).to(torch::kUInt8);
+    // 获取预测结果并转换为掩码
+    torch::Tensor pred_indices = output.argmax(1).squeeze(0).to(torch::kCPU).to(torch::kUInt8);
     
-    // 转换为cv::Mat
+    // 直接创建cv::Mat，避免内存拷贝（利用连续内存布局）
     cv::Mat pred_mask(gray_img.rows, gray_img.cols, CV_8UC1);
     std::memcpy(pred_mask.data, pred_indices.data_ptr(), pred_indices.numel() * sizeof(uint8_t));
 
-    return pred_mask.clone();
+    return pred_mask;  // 移除冗余的clone
 }
 
 /**
- * 掩码可视化：将前景转为白色，其他保持黑色
+ * 掩码可视化：将前景转为白色，其他保持黑色（优化版本）
  */
 cv::Mat mask_to_image(const cv::Mat& mask) {
-    cv::Mat vis_mask = cv::Mat::zeros(mask.size(), CV_8UC1);
-    vis_mask.setTo(0, mask == 0);
-    vis_mask.setTo(128, mask == 1);
-    vis_mask.setTo(255, mask == 2);  // 类别2是前景
+    // 预分配结果矩阵（与输入相同尺寸和类型）
+    cv::Mat vis_mask(mask.size(), CV_8UC1);
+    
+    // 使用LUT（查找表）加速颜色映射（比setTo更高效）
+    uchar lut[256] = {0};  // 初始化所有值为0
+    lut[1] = 128;          // 类别1映射为128
+    lut[2] = 255;          // 类别2映射为255
+    
+    cv::LUT(mask, cv::Mat(1, 256, CV_8UC1, lut), vis_mask);
+    
     return vis_mask;
 }
 
 /**
- * 单张图像预测主函数
+ * 单张图像预测主函数（接收预加载的模型）
  */
 void predict_single_image(
-    const std::string& model_path,
+    torch::jit::script::Module& model,  // 传入预加载的模型
+    torch::Device& device,              // 传入设备（与模型一致）
     const std::string& input_img_path,
     const std::string& output_mask_path
 ) {
     try {
-        std::cout << "Start Processing: " << input_img_path << std::endl;
+        std::cout << "Start Predicting: " << fs::path(input_img_path).filename() << std::endl;
 
-        // 1. 初始化设备
-        torch::Device device = torch::kCPU;
-        std::cout << "Device: CPU" << std::endl;
-
-        // 2. 加载模型
-        torch::jit::script::Module model = torch::jit::load(model_path);
-        model.to(device);
-        model.eval();  // 切换到推理模式
-        std::cout << "Model Loaded: " << model_path << std::endl;
-
-        // 3. 读取输入图像并转为灰度图
-        cv::Mat img = cv::imread(input_img_path);
-        if (img.empty()) {
+        // 读取输入图像（假设为8位灰度图，跳过颜色转换）
+        cv::Mat gray_img = cv::imread(input_img_path, cv::IMREAD_GRAYSCALE);
+        if (gray_img.empty()) {
             throw std::runtime_error("Failed to Read Image: " + input_img_path);
         }
-        cv::Mat gray_img;
-        cv::cvtColor(img, gray_img, cv::COLOR_BGR2GRAY);  // 转为8位灰度图
         std::cout << "Input Image Scale: " << gray_img.cols << "x" << gray_img.rows << std::endl;
 
-        // 4. 模型预测
+        // 模型预测（使用传入的模型和设备）
         std::cout << "Prediction In Progress, Generating Raw Mask . . ." << std::endl;
         cv::Mat pred_mask = predict_mask(model, gray_img, device);
         
-        // 5. 应用后处理
+        // 应用后处理
         pred_mask = postprocess_mask(pred_mask);
         std::cout << "Postprocess Applied" << std::endl;
 
-        // 6. 转换为可视化掩码（0->0, 1->128, 2->255）
+        // 转换为可视化掩码
         cv::Mat vis_mask = mask_to_image(pred_mask);
 
-        // 7. 保存输出掩码
-        fs::create_directories(fs::path(output_mask_path).parent_path());
-        cv::imwrite(output_mask_path, vis_mask);
+        // 保存输出掩码（优化：仅在必要时创建目录）
+        const fs::path output_path(output_mask_path);
+        if (!fs::exists(output_path.parent_path())) {
+            fs::create_directories(output_path.parent_path());
+        }
+        
+        // 设置PNG压缩参数（平衡速度与文件大小）
+        std::vector<int> params = {cv::IMWRITE_PNG_COMPRESSION, 0};
+        if (!cv::imwrite(output_mask_path, vis_mask, params)) {
+            throw std::runtime_error("Failed to Save Mask: " + output_mask_path);
+        }
+        
         std::cout << "Mask Saved to: " << output_mask_path << std::endl;
 
-    } catch (const c10::Error& e) {  // 捕获PyTorch的c10::Error异常
-    std::cerr << "PyTorch Error: " << e.what() << std::endl;
+    } catch (const c10::Error& e) {
+        std::cerr << "PyTorch Error: " << e.what() << std::endl;
     }
-    catch (const std::exception& e) {  // 保留原有std异常捕获
+    catch (const std::exception& e) {
         std::cerr << "Standard Error: " << e.what() << std::endl;
     }
-    catch (...) {  // 捕获所有其他未定义异常
+    catch (...) {
         std::cerr << "Unknown Error: An unexpected error occurred." << std::endl;
     }
 }
 }
-// // 测试主函数（硬编码参数）
-// int main() {
-//     // 硬编码测试参数（根据实际需求修改）
-//     const std::string model_path = "../unet_model.pt";       // TorchScript模型路径
-//     const std::string input_img_path = "output/test.png";       // 输入图像路径（需为PNG/JPG）
-//     const std::string output_mask_path = "output/test_mask.png";  // 输出掩码路径
-
-//     // 执行单张图像预测
-//     predict_single_image(model_path, input_img_path, output_mask_path);
-
-//     return 0;
-// }

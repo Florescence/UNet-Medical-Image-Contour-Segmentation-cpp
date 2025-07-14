@@ -49,7 +49,8 @@ bool save_png(const cv::Mat& image, const std::string& output_path) {
     fs::create_directories(fs::path(output_path).parent_path());
     
     // 保存图片
-    if (!cv::imwrite(output_path, image)) {
+    std::vector<int> params = {cv::IMWRITE_PNG_COMPRESSION, 0};
+    if (!cv::imwrite(output_path, image, params)) {
         throw std::runtime_error("Fail to Save PNG File: " + output_path);
     }
     return true;

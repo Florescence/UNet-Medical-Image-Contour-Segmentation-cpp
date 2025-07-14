@@ -4,7 +4,7 @@
 
 using json = nlohmann::json;
 namespace fs = std::filesystem;
-
+namespace Mask2Polygon{
 // 常量定义
 const std::string JSON_VERSION = "1.0.2.799"; // 须调整与Falcon版本一致
 const cv::Scalar CONTOUR_COLOR = cv::Scalar(0, 0, 255);  // 红色轮廓
@@ -21,24 +21,6 @@ json load_size_json(const std::string& json_path) {
     json j;
     f >> j;
     return j;
-}
-
-/**
- * 查找原始PNG图像
- */
-std::string find_original_png(const std::string& base_name, const std::string& output_dir) {
-    // 候选路径列表（优先级从高到低）
-    std::vector<std::string> candidates = {
-        output_dir + "/" + base_name + ".png",
-        fs::path(output_dir).parent_path().string() + "/" + base_name + ".png"
-    };
-
-    for (const auto& path : candidates) {
-        if (fs::exists(path) && fs::path(path).extension() == ".png") {
-            return path;
-        }
-    }
-    return "";  // 未找到
 }
 
 /**
@@ -62,10 +44,8 @@ void generate_json(const std::vector<std::vector<cv::Point>>& contours,
                   int original_width,
                   int original_height) {
     json j;
-    j["version"] = JSON_VERSION;
-    j["imagePath"] = base_name;
-    j["imageWidth"] = original_width;
-    j["imageHeight"] = original_height;
+    j["version"] = "1.0.2.812";
+    j["imagePath"] = base_name + ".raw";
     j["imageData"] = nullptr;
     j["flags"] = json::object();
     j["shapes"] = json::array();
@@ -75,11 +55,7 @@ void generate_json(const std::vector<std::vector<cv::Point>>& contours,
         json shape;
         shape["label"] = 1;
         shape["labelIndex"] = 0;
-        shape["shape_type"] = "polygon";
-        shape["description"] = "";
-        shape["mask"] = nullptr;
-        shape["group_id"] = nullptr;
-        shape["flags"] = json::object();
+        
 
         // 转换点坐标格式
         json points;
@@ -87,8 +63,18 @@ void generate_json(const std::vector<std::vector<cv::Point>>& contours,
             points.push_back({pt.x, pt.y});
         }
         shape["points"] = points;
+
+        shape["shape_type"] = "polygon";
+        shape["description"] = "";
+        shape["mask"] = nullptr;
+        shape["group_id"] = nullptr;
+        shape["flags"] = json::object();
+        
         j["shapes"].push_back(shape);
     }
+    
+    j["imageWidth"] = original_width;
+    j["imageHeight"] = original_height;
 
     // 保存JSON文件
     std::ofstream f(json_path);
@@ -123,7 +109,8 @@ void create_overlay_image(const std::vector<std::vector<cv::Point>>& contours,
  */
 void process_single_mask(const std::string& mask_path,
                         const std::string& output_dir,
-                        const std::string& json_path) {
+                        const std::string& json_path,
+                        const std::string& original_png) {
     try {
         // 1. 提取文件名（不含扩展名）
         std::string base_name = fs::path(mask_path).stem().string();
@@ -159,7 +146,6 @@ void process_single_mask(const std::string& mask_path,
         std::cout << "JSON Saved to: " << output_json_path << std::endl;
 
         // 6. 创建覆盖图
-        std::string original_png = find_original_png(base_name, output_dir);
         if (original_png.empty()) {
             std::cout << "Warning: Cannot Find Initial PNG, Skip Producing Overlay Image" << std::endl;
             return;
@@ -172,19 +158,19 @@ void process_single_mask(const std::string& mask_path,
         std::cerr << "Processing Failure: " << e.what() << std::endl;
     }
 }
-
-// 测试主函数（硬编码参数）
-int main() {
-    // 硬编码测试参数（根据实际需求修改）
-    const std::string mask_path = "output/test.png";    // 输入掩码路径
-    const std::string output_dir = "output";            // 输出目录
-    const std::string size_json_path = "output/original_sizes.json";  // 尺寸JSON路径
-
-    // 创建输出目录
-    fs::create_directories(output_dir);
-
-    // 处理单张掩码
-    process_single_mask(mask_path, output_dir, size_json_path);
-
-    return 0;
 }
+// // 测试主函数（硬编码参数）
+// int main() {
+//     // 硬编码测试参数（根据实际需求修改）
+//     const std::string mask_path = "output/test.png";    // 输入掩码路径
+//     const std::string output_dir = "output";            // 输出目录
+//     const std::string size_json_path = "output/original_sizes.json";  // 尺寸JSON路径
+
+//     // 创建输出目录
+//     fs::create_directories(output_dir);
+
+//     // 处理单张掩码
+//     process_single_mask(mask_path, output_dir, size_json_path);
+
+//     return 0;
+// }

@@ -4,6 +4,7 @@
 
 using json = nlohmann::json;
 namespace fs = std::filesystem;
+namespace PngNormalize{
 
 // 常量定义（目标尺寸固定为512x512）
 const int TARGET_SIZE = 512;
@@ -129,7 +130,7 @@ void normalize_single_png(const std::string& input_path,
         std::cerr << "Processing Failure: " << e.what() << std::endl;
     }
 }
-
+}
 // 主函数（硬编码测试参数）
 // int main() {
 //     // 测试参数（根据实际需求修改）

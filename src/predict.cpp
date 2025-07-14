@@ -1,9 +1,14 @@
 #include "predict.h"
 #include <iostream>
+#include <fstream>
+#include <filesystem>
 #include <c10/util/Exception.h>
 #include "post_process.cpp"  // 包含后处理函数
 
-// 常量定义（与Python版本保持一致）
+namespace fs = std::filesystem;
+namespace Predict{
+
+    // 常量定义（与Python版本保持一致）
 const int INPUT_CHANNELS = 1;    // 输入图像通道数（灰度图）
 const int NUM_CLASSES = 3;       // 多分类类别数（0/1/2）
 
@@ -120,6 +125,7 @@ void predict_single_image(
         cv::Mat vis_mask = mask_to_image(pred_mask);
 
         // 7. 保存输出掩码
+        fs::create_directories(fs::path(output_mask_path).parent_path());
         cv::imwrite(output_mask_path, vis_mask);
         std::cout << "Mask Saved to: " << output_mask_path << std::endl;
 
@@ -133,7 +139,7 @@ void predict_single_image(
         std::cerr << "Unknown Error: An unexpected error occurred." << std::endl;
     }
 }
-
+}
 // // 测试主函数（硬编码参数）
 // int main() {
 //     // 硬编码测试参数（根据实际需求修改）

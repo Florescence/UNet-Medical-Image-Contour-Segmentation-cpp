@@ -6,6 +6,7 @@
 #include <stdexcept>
 
 namespace fs = std::filesystem;
+namespace Raw2Png {
 
 // 读取16位RAW图像数据
 cv::Mat read_raw_image(const std::string& raw_path, int width, int height) {
@@ -75,7 +76,7 @@ bool raw_to_png(const std::string& raw_path, const std::string& output_path, int
         return false;
     }
 }
-
+}
 // // 主函数（硬编码参数测试）
 // int main() {
 //     // 硬编码测试参数（根据实际需求修改）

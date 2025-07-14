@@ -4,6 +4,7 @@
 
 using json = nlohmann::json;
 namespace fs = std::filesystem;
+namespace PngDenormalize{
 
 // 常量定义（与Python版本保持一致）
 const int TARGET_SIZE = 512;  // 归一化时的目标尺寸（固定512x512）
@@ -101,9 +102,9 @@ void denormalize_single_png(const std::string& input_img_path,
         // 2. 加载原始尺寸信息
         json sizes_json = load_original_sizes(json_path);
         std::string filename = fs::path(input_img_path).filename().string();
-        if (!sizes_json.contains(filename)) {
-            throw std::runtime_error("Cannot Find Initial Scale Info from JSON File " + filename);
-        }
+        // if (!sizes_json.contains(filename)) {
+        //     throw std::runtime_error("Cannot Find Initial Scale Info from JSON File " + filename);
+        // }
         int orig_width = sizes_json[filename]["width"];
         int orig_height = sizes_json[filename]["height"];
         std::cout << "Initial Scale: " << orig_width << "x" << orig_height << std::endl;
@@ -114,6 +115,7 @@ void denormalize_single_png(const std::string& input_img_path,
         );
 
         // 4. 保存结果
+        fs::create_directories(fs::path(output_img_path).parent_path());
         save_denormalized_image(denormalized_img, output_img_path);
         std::cout << "Denormalize Complete, Image Saved to: " << output_img_path << std::endl;
 
@@ -121,7 +123,7 @@ void denormalize_single_png(const std::string& input_img_path,
         std::cerr << "Processing Failure: " << e.what() << std::endl;
     }
 }
-
+}
 // 测试主函数（硬编码参数）
 // int main() {
 //     // 硬编码测试参数（根据实际需求修改）

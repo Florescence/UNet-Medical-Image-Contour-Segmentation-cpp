@@ -17,5 +17,6 @@ namespace Mask2Polygon {
                             const std::string& overlay_path);
     void process_single_mask(const std::string& mask_path,
                             const std::string& output_dir,
-                            const std::string& json_path);
+                            const std::string& json_path,
+                            const std::string& original_png);
 }

@@ -9,21 +9,22 @@
                 "/utf-8",
                 "/std:c++17",
                 "/MD",
-                "/Fe:\"${workspaceFolder}/bin/seg_main.exe\"", //修改不同文件
+                "/Fe:\"${workspaceFolder}/bin/seg_main.exe\"",  // 输出可执行文件路径
                 "/Zi",
                 "/EHsc",
+                // 头文件路径（-I 选项，指定 .h 文件所在目录）
                 "/I", "\"D:/Program Files/libtorch/include\"",
                 "/I", "\"D:/Program Files/libtorch/include/torch/csrc/api/include\"",
                 "/I", "\"D:/PROGRA~1/OpenCV4.7/install_x64_release/include\"",
-                "/I", "C:/Users/tingsheng.cai/VSCodeProjects/UNet-Medical-Image-Contour-Segmentation/include",
-                "/I", "C:/Users/tingsheng.cai/VSCodeProjects/UNet-Medical-Image-Contour-Segmentation/src/seg_main.cpp",
-                "/I", "C:/Users/tingsheng.cai/VSCodeProjects/UNet-Medical-Image-Contour-Segmentation/src/raw2png.cpp",
-                "/I", "C:/Users/tingsheng.cai/VSCodeProjects/UNet-Medical-Image-Contour-Segmentation/src/png_normalize.cpp",
-                "/I", "C:/Users/tingsheng.cai/VSCodeProjects/UNet-Medical-Image-Contour-Segmentation/src/predict.cpp",
-                "/I", "C:/Users/tingsheng.cai/VSCodeProjects/UNet-Medical-Image-Contour-Segmentation/src/png_denormalize.cpp",
-                "/I", "C:/Users/tingsheng.cai/VSCodeProjects/UNet-Medical-Image-Contour-Segmentation/src/mask2polygon.cpp",
-                "/I", "\"${workspaceFolder}/include\"",
-                "\"${workspaceFolder}/src/seg_main.cpp\"", //修改不同文件
+                "/I", "\"${workspaceFolder}/include\"",  // 自定义头文件目录
+                // 源文件（.cpp 文件，作为编译输入）
+                "\"${workspaceFolder}/src/raw2png.cpp\"",
+                "\"${workspaceFolder}/src/png_normalize.cpp\"",
+                "\"${workspaceFolder}/src/predict.cpp\"",
+                "\"${workspaceFolder}/src/png_denormalize.cpp\"",
+                "\"${workspaceFolder}/src/mask2polygon.cpp\"",
+                "\"${workspaceFolder}/src/seg_main.cpp\"",
+                // 链接选项（库路径和库文件）
                 "/link",
                 "/LIBPATH:\"D:/Program Files/libtorch/lib\"",
                 "/LIBPATH:\"D:/PROGRA~1/OpenCV4.7/install_x64_release/x64/vc16/staticlib\"",
@@ -32,7 +33,6 @@
                 "/LIBPATH:\"C:/Program Files (x86)/Windows Kits/10/Lib/10.0.22621.0/ucrt/x64\"",
                 "D:/Program Files/libtorch/lib/*.lib",
                 "D:/PROGRA~1/OpenCV4.7/install_x64_release/x64/vc16/staticlib/*.lib"
-
             ],
             "group": {
                 "kind": "build",

@@ -2,15 +2,15 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "MSVC - 启动",
+            "name": "Debug seg_main",
             "type": "cppvsdbg",
             "request": "launch",
-            "program": "${workspaceFolder}/bin/mask2polygon.exe",
-            "args": [],
+            "program": "${workspaceFolder}/bin/predict.exe",
+            //"args": ["4276.raw", "../unet_model.onnx", "output", "4267", "4267", "gpu"],
             "stopAtEntry": false,
-            "cwd": "${workspaceFolder}",
+            "cwd": "${workspaceFolder}/bin",
             "environment": [],
-            "externalConsole": false
+            "externalConsole": true
         }
     ]
 }

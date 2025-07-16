@@ -2,126 +2,292 @@
 #include <iostream>
 #include <fstream>
 #include <filesystem>
-#include <c10/util/Exception.h>
-#include "post_process.cpp"  // 包含后处理函数
+#include "post_process.cpp"
 
 namespace fs = std::filesystem;
-namespace Predict{
+namespace Predict {
 
-// 常量定义（与Python版本保持一致）
-const int INPUT_CHANNELS = 1;    // 输入图像通道数（灰度图）
-const int NUM_CLASSES = 3;       // 多分类类别数（0/1/2）
+// 释放 TensorRT 资源的工具函数
+void freeTrtResources(nvinfer1::IExecutionContext* context, nvinfer1::ICudaEngine* engine, nvinfer1::IRuntime* runtime) {
+    if (context) context->destroy();
+    if (engine) engine->destroy();
+    if (runtime) runtime->destroy();
+}
 
-/**
- * 图像预处理：转为Tensor并标准化（优化版本）
- * 假设输入已为8位灰度图（由第二步归一化保证）
- */
-torch::Tensor preprocess_image(const cv::Mat& gray_img) {
-    // 直接创建Tensor，避免额外内存拷贝（利用OpenCV和PyTorch内存连续性）
-    torch::Tensor tensor = torch::from_blob(
-        gray_img.data,
-        {1, INPUT_CHANNELS, gray_img.rows, gray_img.cols},
-        torch::kUInt8
-    ).clone();  // 克隆数据以分离生命周期（确保Tensor不依赖原始cv::Mat）
+TRTLogger::TRTLogger(std::ofstream& log_file) : log_file_(log_file) {}
 
-    // 直接在Tensor上执行归一化（替代OpenCV的convertTo）
-    tensor = tensor.to(torch::kFloat32).div(255.0);
-    
-    return tensor;
+void TRTLogger::log(Severity severity, const char* msg) noexcept {
+    std::string severity_str;
+    switch (severity) {
+        case Severity::kINTERNAL_ERROR: severity_str = "[INTERNAL ERROR]"; break;
+        case Severity::kERROR:          severity_str = "[ERROR]"; break;
+        case Severity::kWARNING:        severity_str = "[WARNING]"; break;
+        case Severity::kINFO:           severity_str = "[INFO]"; break;
+        default:                        severity_str = "[UNKNOWN]";
+    }
+    std::string log_msg = "TRT " + severity_str + ": " + std::string(msg);
+    //std::cout << log_msg << std::endl;  // 同时输出到控制台
+    log_file_ << log_msg << std::endl;  // 输出到日志文件
 }
 
 /**
- * 模型预测：使用预加载的模型执行推理（模型由外部传入）
+ * 用 TensorRT 解析 ONNX 模型并构建引擎（支持动态形状和序列化缓存）
  */
-cv::Mat predict_mask(torch::jit::script::Module& model, const cv::Mat& gray_img, torch::Device device) {
-    // 预处理图像对齐模型输入
-    torch::Tensor input_tensor = preprocess_image(gray_img).to(device);
+nvinfer1::ICudaEngine* buildTrtEngine(
+    const std::string& onnx_path, 
+    const std::string& engine_cache_path, 
+    TRTLogger& logger, 
+    const TRTConfig& trt_config) {
+    // 日志输出通过 logger 写入文件
+    logger.log(nvinfer1::ILogger::Severity::kINFO, "Attempting to load or build TensorRT engine...");
 
-    // 模型推理（移除冗余的张量验证，假设输入有效）
-    std::vector<torch::jit::IValue> inputs;
-    inputs.push_back(input_tensor);
-    torch::NoGradGuard no_grad;
-    torch::Tensor output = model.forward(inputs).toTensor();
+    // 若存在缓存的引擎文件，直接加载
+    if (fs::exists(engine_cache_path)) {
+        std::ifstream engine_file(engine_cache_path, std::ios::binary);
+        if (engine_file) {
+            engine_file.seekg(0, std::ios::end);
+            size_t size = engine_file.tellg();
+            engine_file.seekg(0, std::ios::beg);
+            std::vector<char> engine_data(size);
+            engine_file.read(engine_data.data(), size);
+            
+            nvinfer1::IRuntime* runtime = nvinfer1::createInferRuntime(logger);
+            nvinfer1::ICudaEngine* engine = runtime->deserializeCudaEngine(engine_data.data(), size);
+            runtime->destroy();
+            
+            std::string msg = "Loaded TensorRT engine from cache: " + engine_cache_path;
+            logger.log(nvinfer1::ILogger::Severity::kINFO, msg.c_str());
+            return engine;
+        }
+    }
 
-    // 获取预测结果并转换为掩码
-    torch::Tensor pred_indices = output.argmax(1).squeeze(0).to(torch::kCPU).to(torch::kUInt8);
-    
-    // 直接创建cv::Mat，避免内存拷贝（利用连续内存布局）
+    // 无缓存时，从 ONNX 构建引擎
+    nvinfer1::IBuilder* builder = nvinfer1::createInferBuilder(logger);
+    nvinfer1::INetworkDefinition* network = builder->createNetworkV2(1U << static_cast<uint32_t>(nvinfer1::NetworkDefinitionCreationFlag::kEXPLICIT_BATCH));
+    nvinfer1::IBuilderConfig* builder_config = builder->createBuilderConfig();
+    nvonnxparser::IParser* parser = nvonnxparser::createParser(*network, logger);
+
+    // 解析 ONNX 模型
+    if (!parser->parseFromFile(onnx_path.c_str(), static_cast<int>(nvinfer1::ILogger::Severity::kINFO))) {
+        std::string error_msg = "Failed to parse ONNX model! Errors: ";
+        for (int i = 0; i < parser->getNbErrors(); ++i) {
+            error_msg += parser->getError(i)->desc();
+        }
+        throw std::runtime_error(error_msg);
+    }
+
+    // 关键修改：检查并修正模型输入维度（处理动态维度）
+    nvinfer1::ITensor* input_tensor = network->getInput(0);
+    nvinfer1::Dims input_dims = input_tensor->getDimensions();
+    logger.log(nvinfer1::ILogger::Severity::kINFO, "Original model input dimensions:");
+
+    // 修正负数维度（动态维度）
+    for (int i = 0; i < input_dims.nbDims; ++i) {
+        if (input_dims.d[i] < 0) {
+            input_dims.d[i] = (i == 0) ? 1 : input_dims.d[i];  // 批次维度设为1
+            logger.log(nvinfer1::ILogger::Severity::kINFO, ("Replaced negative dimension at index " + std::to_string(i) + " with " + std::to_string(input_dims.d[i])).c_str());
+        }
+    }
+
+    // 验证所有维度非负
+    for (int i = 0; i < input_dims.nbDims; ++i) {
+        if (input_dims.d[i] < 0) {
+            throw std::runtime_error("Input dimension " + std::to_string(i) + " is still negative after correction!");
+        }
+    }
+
+    // 配置引擎参数（使用 TRTConfig）
+    builder_config->setMemoryPoolLimit(nvinfer1::MemoryPoolType::kWORKSPACE, trt_config.workspace_size);
+    if (trt_config.use_fp16 && builder->platformHasFastFp16()) {
+        builder_config->setFlag(nvinfer1::BuilderFlag::kFP16);
+        logger.log(nvinfer1::ILogger::Severity::kINFO, "Enabled FP16 precision for acceleration");
+    }
+
+    // 为动态输入添加优化配置文件
+    nvinfer1::IOptimizationProfile* profile = builder->createOptimizationProfile();
+    const char* input_name = "input";
+
+    // 检查输入维度是否为 [N, C, H, W]
+    if (input_dims.nbDims != 4) {
+        throw std::runtime_error("Expected 4D input (N, C, H, W), but got " + std::to_string(input_dims.nbDims) + "D");
+    }
+
+    // 设置动态尺寸范围
+    profile->setDimensions(input_name, nvinfer1::OptProfileSelector::kMIN, 
+        nvinfer1::Dims4(input_dims.d[0], input_dims.d[1], trt_config.min_height, trt_config.min_width));
+    profile->setDimensions(input_name, nvinfer1::OptProfileSelector::kOPT, 
+        nvinfer1::Dims4(input_dims.d[0], input_dims.d[1], trt_config.opt_height, trt_config.opt_width));
+    profile->setDimensions(input_name, nvinfer1::OptProfileSelector::kMAX, 
+        nvinfer1::Dims4(input_dims.d[0], input_dims.d[1], trt_config.max_height, trt_config.max_width));
+    builder_config->addOptimizationProfile(profile);
+
+    // 构建引擎并序列化
+    nvinfer1::IHostMemory* serialized_engine = builder->buildSerializedNetwork(*network, *builder_config);
+    if (!serialized_engine) {
+        throw std::runtime_error("Failed to build serialized engine (check input shape or TRTConfig)");
+    }
+    nvinfer1::ICudaEngine* engine = builder->buildEngineWithConfig(*network, *builder_config);
+    if (!engine) {
+        throw std::runtime_error("Failed to build TensorRT engine from network");
+    }
+
+    // 保存引擎到缓存
+    std::ofstream engine_file(engine_cache_path, std::ios::binary);
+    engine_file.write(reinterpret_cast<const char*>(serialized_engine->data()), serialized_engine->size());
+    logger.log(nvinfer1::ILogger::Severity::kINFO, ("Built and saved TensorRT engine to: " + engine_cache_path).c_str());
+
+    // 释放中间资源
+    parser->destroy();
+    builder_config->destroy();
+    network->destroy();
+    builder->destroy();
+    serialized_engine->destroy();
+
+    return engine;
+}
+
+/**
+ * 图像预处理（保持不变）
+ */
+std::vector<float> preprocess_image(const cv::Mat& gray_img) {
+    std::vector<float> input_data(gray_img.rows * gray_img.cols);
+    for (int i = 0; i < gray_img.rows; ++i) {
+        for (int j = 0; j < gray_img.cols; ++j) {
+            input_data[i * gray_img.cols + j] = static_cast<float>(gray_img.at<uchar>(i, j)) / 255.0f;
+        }
+    }
+    return input_data;
+}
+
+/**
+ * 模型预测：适配动态形状输入
+ */
+cv::Mat predict_mask(nvinfer1::ICudaEngine* engine, const cv::Mat& gray_img, std::ofstream& log_file) {
+    nvinfer1::IExecutionContext* context = engine->createExecutionContext();
+
+    // 获取输入输出绑定信息
+    const int input_idx = engine->getBindingIndex("input");
+    const int output_idx = engine->getBindingIndex("output");
+    nvinfer1::Dims input_dims = engine->getBindingDimensions(input_idx);
+
+    // 动态设置当前输入尺寸
+    input_dims.d[2] = gray_img.rows;  // H
+    input_dims.d[3] = gray_img.cols;  // W
+    if (!context->setBindingDimensions(input_idx, input_dims)) {
+        throw std::runtime_error("Input size out of range! Check TRTConfig min/max dimensions");
+    }
+
+    // 获取调整后的输出尺寸
+    nvinfer1::Dims output_dims = context->getBindingDimensions(output_idx);
+
+    // 计算内存大小
+    size_t input_size = 1;
+    for (int i = 0; i < input_dims.nbDims; ++i) input_size *= input_dims.d[i];
+    input_size *= sizeof(float);
+
+    size_t output_size = 1;
+    for (int i = 0; i < output_dims.nbDims; ++i) output_size *= output_dims.d[i];
+    output_size *= sizeof(float);
+
+    // 分配 GPU 内存
+    float* d_input = nullptr;
+    float* d_output = nullptr;
+    cudaMalloc(&d_input, input_size);
+    cudaMalloc(&d_output, output_size);
+
+    // 预处理并拷贝数据
+    std::vector<float> input_data = preprocess_image(gray_img);
+    cudaMemcpy(d_input, input_data.data(), input_size, cudaMemcpyHostToDevice);
+
+    // 执行推理
+    void* bindings[] = {d_input, d_output};
+    context->executeV2(bindings);
+
+    // 拷贝输出数据到 CPU
+    std::vector<float> output_data(output_size / sizeof(float));
+    cudaMemcpy(output_data.data(), d_output, output_size, cudaMemcpyDeviceToHost);
+
+    // 释放 GPU 内存和上下文
+    cudaFree(d_input);
+    cudaFree(d_output);
+    context->destroy();
+
+    // 后处理生成掩码
     cv::Mat pred_mask(gray_img.rows, gray_img.cols, CV_8UC1);
-    std::memcpy(pred_mask.data, pred_indices.data_ptr(), pred_indices.numel() * sizeof(uint8_t));
+    int H = gray_img.rows, W = gray_img.cols;
+    int num_classes = output_dims.d[1];  // 从输出维度获取类别数
+    log_file << "Prediction: Output classes detected - " << num_classes << std::endl;
 
-    return pred_mask;  // 移除冗余的clone
+    for (int i = 0; i < H; ++i) {
+        for (int j = 0; j < W; ++j) {
+            int max_idx = 0;
+            float max_val = output_data[i * W * num_classes + j * num_classes + 0];
+            for (int c = 1; c < num_classes; ++c) {
+                float val = output_data[i * W * num_classes + j * num_classes + c];
+                if (val > max_val) {
+                    max_val = val;
+                    max_idx = c;
+                }
+            }
+            pred_mask.at<uchar>(i, j) = static_cast<uchar>(max_idx);
+        }
+    }
+
+    return pred_mask;
 }
 
 /**
- * 掩码可视化：将前景转为白色，其他保持黑色（优化版本）
+ * 掩码可视化（保持不变）
  */
 cv::Mat mask_to_image(const cv::Mat& mask) {
-    // 预分配结果矩阵（与输入相同尺寸和类型）
     cv::Mat vis_mask(mask.size(), CV_8UC1);
-    
-    // 使用LUT（查找表）加速颜色映射（比setTo更高效）
-    uchar lut[256] = {0};  // 初始化所有值为0
-    lut[1] = 128;          // 类别1映射为128
-    lut[2] = 255;          // 类别2映射为255
-    
+    uchar lut[256] = {0};
+    lut[1] = 128;
+    lut[2] = 255;
     cv::LUT(mask, cv::Mat(1, 256, CV_8UC1, lut), vis_mask);
-    
     return vis_mask;
 }
 
 /**
- * 单张图像预测主函数（接收预加载的模型）
+ * 单张图像预测主函数（支持日志文件输出）
  */
 void predict_single_image(
-    torch::jit::script::Module& model,  // 传入预加载的模型
-    torch::Device& device,              // 传入设备（与模型一致）
+    nvinfer1::ICudaEngine* engine,
     const std::string& input_img_path,
-    const std::string& output_mask_path
+    const std::string& output_mask_path,
+    std::ofstream& log_file
 ) {
     try {
-        std::cout << "Start Predicting: " << fs::path(input_img_path).filename() << std::endl;
+        std::string msg = "Start Predicting: " + fs::path(input_img_path).filename().string();
+        log_file << msg << std::endl;
+        std::cout << msg << std::endl;
 
-        // 读取输入图像（假设为8位灰度图，跳过颜色转换）
         cv::Mat gray_img = cv::imread(input_img_path, cv::IMREAD_GRAYSCALE);
         if (gray_img.empty()) {
-            throw std::runtime_error("Failed to Read Image: " + input_img_path);
+            throw std::runtime_error("Failed to read image: " + input_img_path);
         }
-        std::cout << "Input Image Scale: " << gray_img.cols << "x" << gray_img.rows << std::endl;
 
-        // 模型预测（使用传入的模型和设备）
-        std::cout << "Prediction In Progress, Generating Raw Mask . . ." << std::endl;
-        cv::Mat pred_mask = predict_mask(model, gray_img, device);
-        
-        // 应用后处理
+        cv::Mat pred_mask = predict_mask(engine, gray_img, log_file);
         pred_mask = postprocess_mask(pred_mask);
-        std::cout << "Postprocess Applied" << std::endl;
+        log_file << "Postprocess applied" << std::endl;
+        std::cout << "Postprocess applied" << std::endl;
 
-        // 转换为可视化掩码
         cv::Mat vis_mask = mask_to_image(pred_mask);
-
-        // 保存输出掩码（优化：仅在必要时创建目录）
-        const fs::path output_path(output_mask_path);
-        if (!fs::exists(output_path.parent_path())) {
-            fs::create_directories(output_path.parent_path());
-        }
-        
-        // 设置PNG压缩参数（平衡速度与文件大小）
+        fs::create_directories(fs::path(output_mask_path).parent_path());
         std::vector<int> params = {cv::IMWRITE_PNG_COMPRESSION, 0};
         if (!cv::imwrite(output_mask_path, vis_mask, params)) {
-            throw std::runtime_error("Failed to Save Mask: " + output_mask_path);
+            throw std::runtime_error("Failed to save mask: " + output_mask_path);
         }
-        
-        std::cout << "Mask Saved to: " << output_mask_path << std::endl;
 
-    } catch (const c10::Error& e) {
-        std::cerr << "PyTorch Error: " << e.what() << std::endl;
-    }
-    catch (const std::exception& e) {
-        std::cerr << "Standard Error: " << e.what() << std::endl;
-    }
-    catch (...) {
-        std::cerr << "Unknown Error: An unexpected error occurred." << std::endl;
+        msg = "Mask saved to: " + output_mask_path;
+        log_file << msg << std::endl;
+        std::cout << msg << std::endl;
+
+    } catch (const std::exception& e) {
+        std::string error = "Prediction error: " + std::string(e.what());
+        log_file << error << std::endl;
+        std::cerr << error << std::endl;
     }
 }
-}
+
+}  // namespace Predict

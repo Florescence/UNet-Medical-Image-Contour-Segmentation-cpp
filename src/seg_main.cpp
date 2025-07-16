@@ -1,172 +1,192 @@
 #include <iostream>
+#include <fstream>
 #include <filesystem>
 #include <chrono>
 #include <cstdlib>
-#include <torch/torch.h>
-#include <torch/script.h>
+#include <opencv2/opencv.hpp>
+#include <NvInfer.h>
 #include "raw2png.h"
 #include "png_normalize.h"
 #include "predict.h"
-#include "png_denormalize.h"
 #include "mask2polygon.h"
 
 namespace fs = std::filesystem;
 using namespace std::chrono;
 
-// 打印命令行参数使用说明
+// 日志文件流（全局，用于所有日志输出）
+std::ofstream log_file;
+
+// 自定义日志输出函数（同时输出到控制台和日志文件）
+void log(const std::string& message) {
+    //std::cout << message << std::endl;
+    log_file << message << std::endl;
+}
+
+// 打印使用说明
 void print_usage(const std::string& program_name) {
-    std::cerr << "Usage: " << program_name << " <raw_path> <model_path> <output_dir> <raw_width> <raw_height>" << std::endl;
-    std::cerr << "Example:" << std::endl;
-    std::cerr << "  " << program_name << " input.raw model.pt output 3072 3072" << std::endl;
-    std::cerr << "Parameters:" << std::endl;
-    std::cerr << "  <raw_path>    - Input Raw File Path (such as test.raw)" << std::endl;
-    std::cerr << "  <model_path>  - Model File Path (such as unet_model.pt)" << std::endl;
-    std::cerr << "  <output_dir>  - Output Dir Path (such as output)" << std::endl;
-    std::cerr << "  <raw_width>   - RAW Image Width (Int, such as 3072)" << std::endl;
-    std::cerr << "  <raw_height>  - RAW Image Height (Int, such as 3072)" << std::endl;
+    std::cerr << "Medical Image Segmentation Tool" << std::endl;
+    std::cerr << "Usage: " << program_name << " <raw_file_path> <onnx_model_path> <output_directory> <width> <height>" << std::endl;
+    std::cerr << "Example: " << program_name << " ./test.raw ./unet.onnx ./output 512 512" << std::endl;
+}
+
+// 检查文件是否存在
+bool file_exists(const std::string& path, const std::string& desc) {
+    if (!fs::exists(path)) {
+        std::string error = "Error: " + desc + " not found - " + path;
+        log(error);
+        return false;
+    }
+    return true;
 }
 
 int main(int argc, char* argv[]) {
-    // 记录程序启动时间（用于计算所有步骤的总时长，包括模型加载和轮廓生成）
-    auto program_start = high_resolution_clock::now();
-
-    // 校验命令行参数数量
+    // 验证参数
     if (argc != 6) {
-        std::cerr << "Error: Invalid number of parameters!" << std::endl;
+        std::cerr << "Invalid number of arguments! Expected 5, got " << argc - 1 << std::endl;
         print_usage(argv[0]);
         return 1;
     }
 
-    // 解析命令行参数
+    // 解析参数
     const std::string raw_path = argv[1];
-    const std::string model_path = argv[2];
+    const std::string onnx_path = argv[2];
     const std::string output_dir = argv[3];
     const int raw_width = std::atoi(argv[4]);
     const int raw_height = std::atoi(argv[5]);
 
-    // 校验参数有效性
+    // 创建输出目录和日志文件
     try {
-        if (!fs::exists(raw_path)) {
-            throw std::runtime_error("RAW file not found: " + raw_path);
-        }
-        if (!fs::exists(model_path)) {
-            throw std::runtime_error("Model file not found: " + model_path);
-        }
-        if (raw_width <= 0 || raw_height <= 0) {
-            throw std::runtime_error("Invalid width/height (must be positive integers)");
+        fs::create_directories(output_dir);
+        std::string log_path = output_dir + "/segmentation_log.txt";
+        log_file.open(log_path, std::ios::out | std::ios::trunc);  // 覆盖已有日志
+        if (!log_file.is_open()) {
+            throw std::runtime_error("Failed to create log file: " + log_path);
         }
     } catch (const std::exception& e) {
-        std::cerr << "Parameter Validation Error: " << e.what() << std::endl;
-        print_usage(argv[0]);
+        std::cerr << "[ERROR] " << e.what() << std::endl;
         return 1;
     }
 
+    log("=== Medical Image Segmentation Pipeline Started ===");
+    auto program_start = high_resolution_clock::now();
+
+    // 输入验证
+    if (!file_exists(raw_path, "RAW file")) return 1;
+    if (!file_exists(onnx_path, "ONNX model")) return 1;
+
     try {
-        // 创建输出目录
-        fs::create_directories(output_dir);
-        std::cout << "===== Start Processing =====" << std::endl;
-        std::cout << "Parameters:" << std::endl;
-        std::cout << "  RAW Path: " << raw_path << std::endl;
-        std::cout << "  Model Path: " << model_path << std::endl;
-        std::cout << "  Output Dir: " << output_dir << std::endl;
-        std::cout << "  Image Size: " << raw_width << "x" << raw_height << std::endl;
+        // 创建输出子目录
+        const std::string raw_png_dir = output_dir + "/1_raw_png";
+        const std::string norm_png_dir = output_dir + "/2_normalized_png";
+        const std::string pred_mask_dir = output_dir + "/3_pred_masks";
+        const std::string polygon_dir = output_dir + "/4_polygons";
+        fs::create_directories(raw_png_dir);
+        fs::create_directories(norm_png_dir);
+        fs::create_directories(pred_mask_dir);
+        fs::create_directories(polygon_dir);
 
-        // -------------------------- 模型加载（不计入总耗时） --------------------------
+        // 打印配置信息
+        log("\n[Configuration]");
+        log("Input RAW: " + fs::path(raw_path).filename().string() + " (" + std::to_string(raw_width) + "x" + std::to_string(raw_height) + ")");
+        log("Model: " + fs::path(onnx_path).filename().string());
+        log("Output Dir: " + output_dir);
+        log("Device: GPU (fixed)");
+
+        // 加载TensorRT引擎
         auto model_load_start = high_resolution_clock::now();
-        std::cout << "\nLoading Model: " << model_path << std::endl;
+        Predict::TRTLogger logger(log_file);  // 传递日志文件给TRTLogger
+        const std::string engine_cache_path = output_dir + "/trt_engine_512x512.cache";
+        
+        // 固定TRT配置为512x512
+        Predict::TRTConfig trt_config;
+        trt_config.min_width = 512;
+        trt_config.min_height = 512;
+        trt_config.opt_width = 512;
+        trt_config.opt_height = 512;
+        trt_config.max_width = 512;
+        trt_config.max_height = 512;
+        trt_config.workspace_size = 64 * 1024 * 1024;  // 128MB工作空间
+        trt_config.use_fp16 = true;
 
-        // 初始化设备（保持CPU）
-        torch::Device device(torch::kCPU);
-
-        // 加载模型
-        torch::jit::script::Module model = torch::jit::load(model_path);
-        model.to(device);  // 将模型移动到设备
-        model.eval();      // 切换到推理模式
-
-        // 计算模型加载时间（单独统计）
+        nvinfer1::ICudaEngine* engine = Predict::buildTrtEngine(onnx_path, engine_cache_path, logger, trt_config);
+        if (!engine) {
+            throw std::runtime_error("Failed to create TensorRT engine");
+        }
         auto model_load_end = high_resolution_clock::now();
-        duration<double> model_load_time = model_load_end - model_load_start;
-        std::cout << "Model Load Complete! Time: " << model_load_time.count() << " sec" << std::endl;
-        // --------------------------------------------------------------------------
+        log("\nEngine loaded in " + std::to_string(duration_cast<milliseconds>(model_load_end - model_load_start).count()) + " ms");
 
-        // 记录核心流程开始时间（从步骤1到步骤4，不含模型加载和步骤5）
+        // 核心处理流程
         auto core_start = high_resolution_clock::now();
 
         // 步骤1: RAW转PNG
         auto step1_start = high_resolution_clock::now();
-        std::string raw_png_path = output_dir + "/1_raw_png/test.png";
+        const std::string raw_png_path = raw_png_dir + "/test.png";
         Raw2Png::raw_to_png(raw_path, raw_png_path, raw_width, raw_height);
         auto step1_end = high_resolution_clock::now();
-        duration<double> step1_time = step1_end - step1_start;
-        std::cout << "\nStep 1 Time: " << step1_time.count() << " sec" << std::endl;
-
+        log("Step 1/4: RAW to PNG - " + std::to_string(duration_cast<milliseconds>(step1_end - step1_start).count()) + " ms");
 
         // 步骤2: PNG归一化
         auto step2_start = high_resolution_clock::now();
-        std::string norm_png_path = output_dir + "/2_normalized_png/test.png";
-        std::string size_json_path = output_dir + "/2_normalized_png/original_sizes.json";
+        const std::string norm_png_path = norm_png_dir + "/test.png";
+        const std::string size_json_path = norm_png_dir + "/original_sizes.json";
         PngNormalize::normalize_single_png(raw_png_path, norm_png_path, size_json_path);
         auto step2_end = high_resolution_clock::now();
-        duration<double> step2_time = step2_end - step2_start;
-        std::cout << "Step 2 Time: " << step2_time.count() << " sec" << std::endl;
+        log("Step 2/4: Image Normalization - " + std::to_string(duration_cast<milliseconds>(step2_end - step2_start).count()) + " ms");
 
-
-        // 步骤3: 模型预测（传入预加载的模型和设备）
+        // 步骤3: 模型预测
         auto step3_start = high_resolution_clock::now();
-        std::string pred_mask_path = output_dir + "/3_pred_masks/test.png";
-        Predict::predict_single_image(model, device, norm_png_path, pred_mask_path);  // 传入模型和设备
+        const std::string pred_mask_path = pred_mask_dir + "/test.png";
+        
+        // 执行推理
+        Predict::predict_single_image(engine, norm_png_path, pred_mask_path, log_file);
         auto step3_end = high_resolution_clock::now();
-        duration<double> step3_time = step3_end - step3_start;
-        std::cout << "Step 3 Time: " << step3_time.count() << " sec" << std::endl;
+        log("Step 3/4: Model Inference - " + std::to_string(duration_cast<milliseconds>(step3_end - step3_start).count()) + " ms");
 
-
-        // 步骤4: 掩码反归一化
+        // 步骤4: 生成轮廓
         auto step4_start = high_resolution_clock::now();
-        std::string denorm_mask_path = output_dir + "/4_denormalized_mask/test.png";
-        PngDenormalize::denormalize_single_png(pred_mask_path, denorm_mask_path, size_json_path);
+        Mask2Polygon::process_single_mask(pred_mask_path, polygon_dir, size_json_path, raw_png_path);
         auto step4_end = high_resolution_clock::now();
-        duration<double> step4_time = step4_end - step4_start;
-        std::cout << "Step 4 Time: " << step4_time.count() << " sec" << std::endl;
+        log("Step 4/4: Polygon Generation - " + std::to_string(duration_cast<milliseconds>(step4_end - step4_start).count()) + " ms");
 
-        // 计算核心流程总耗时（步骤1-4，不含模型加载和步骤5）
+        // 处理总结
         auto core_end = high_resolution_clock::now();
-        duration<double> core_time = core_end - core_start;
+        const auto core_time = duration_cast<milliseconds>(core_end - core_start).count();
+        const auto step1_time = duration_cast<milliseconds>(step1_end - step1_start).count();
+        const auto step2_time = duration_cast<milliseconds>(step2_end - step2_start).count();
+        const auto step3_time = duration_cast<milliseconds>(step3_end - step3_start).count();
+        const auto step4_time = duration_cast<milliseconds>(step4_end - step4_start).count();
 
+        log("\n[Processing Summary]");
+        log("Total processing time: " + std::to_string(core_time) + " ms");
+        log("Breakdown:");
+        log("  Conversion: " + std::to_string(step1_time * 100.0 / core_time) + "% | Normalization: " + std::to_string(step2_time * 100.0 / core_time) + "%");
+        log("  Inference: " + std::to_string(step3_time * 100.0 / core_time) + "% | Polygon: " + std::to_string(step4_time * 100.0 / core_time) + "%");
 
-        // 步骤5: 生成轮廓和覆盖图（不计入总耗时）
-        auto step5_start = high_resolution_clock::now();
-        std::string contour_json_path = output_dir + "/test.json";
-        std::string overlay_path = output_dir + "/test_contour_overlay.png";
-        std::string original_png = output_dir + "/1_raw_png/test.png";
-        Mask2Polygon::process_single_mask(denorm_mask_path, output_dir, size_json_path, original_png);
-        auto step5_end = high_resolution_clock::now();
-        duration<double> step5_time = step5_end - step5_start;
-        std::cout << "\nStep 5 Time: " << step5_time.count() << " sec (not included in total)" << std::endl;
-
-
-        // 计算程序总运行时间（含所有步骤，仅用于参考）
-        auto program_end = high_resolution_clock::now();
-        duration<double> program_total_time = program_end - program_start;
-
-        // 输出核心流程统计（步骤1-4）
-        std::cout << "\n===== Core Process Done =====" << std::endl;
-        std::cout << "Core Total Time (Steps 1-4): " << core_time.count() << " sec" << std::endl;
-        std::cout << "Core Step Percentiles:" << std::endl;
-        std::cout << "  Step 1: " << (step1_time / core_time) * 100 << "%" << std::endl;
-        std::cout << "  Step 2: " << (step2_time / core_time) * 100 << "%" << std::endl;
-        std::cout << "  Step 3: " << (step3_time / core_time) * 100 << "%" << std::endl;
-        std::cout << "  Step 4: " << (step4_time / core_time) * 100 << "%" << std::endl;
-
-        // 输出其他时间统计（供参考）
-        std::cout << "\n===== Additional Timing =====" << std::endl;
-        std::cout << "Model Load Time: " << model_load_time.count() << " sec (not included in core)" << std::endl;
-        std::cout << "Step 5 (Contour) Time: " << step5_time.count() << " sec (not included in core)" << std::endl;
-        std::cout << "Program Total Time (all steps): " << program_total_time.count() << " sec (for reference)" << std::endl;
+        // 释放资源
+        Predict::freeTrtResources(nullptr, engine, nullptr);
+        log("\nResources released. Processing completed.");
 
     } catch (const std::exception& e) {
-        std::cerr << "Processing Failure: " << e.what() << std::endl;
+        std::string error = "[ERROR] " + std::string(e.what());
+        log(error);
+        std::cerr << error << std::endl;  // 错误同时显示在控制台
+        log_file.close();
+        return 1;
+    } catch (...) {
+        std::string error = "[ERROR] Unknown exception occurred";
+        log(error);
+        std::cerr << error << std::endl;
+        log_file.close();
         return 1;
     }
 
+    // 总执行时间
+    auto program_end = high_resolution_clock::now();
+    log("\n=== Pipeline Completed ===");
+    log("Total execution time: " + std::to_string(duration_cast<milliseconds>(program_end - program_start).count()) + " ms");
+    log("Results saved to: " + output_dir);
+
+    // 关闭日志文件
+    log_file.close();
     return 0;
 }

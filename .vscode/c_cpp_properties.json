@@ -5,15 +5,17 @@
             "includePath": [
                 "${workspaceFolder}/**",
                 "${workspaceFolder}/include",
-                "D:/Program Files/libtorch/include",
-                "D:/Program Files/libtorch/include/torch/csrc/api/include",
+                "D:/Program Files/Microsoft.ML.OnnxRuntime.Gpu.1.15.1/build/native/include",  // ONNX Runtime头文件
+                "D:/Program Files/TensorRT-8.6.1.6/include",
                 "D:/Program Files/OpenCV4.7/install_x64_release/include",
                 "D:/Program Files/OpenCV4.7/install_x64_release/include/opencv2",
                 "C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.44.35207/include",
-                "C:/Program Files (x86)/Windows Kits/10/Include/10.0.22621.0/ucrt"
+                "C:/Program Files (x86)/Windows Kits/10/Include/10.0.22621.0/ucrt",
+                "C:/Program Files (x86)/Windows Kits/10/Include/10.0.22621.0/shared",
+                "C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v12.6/include"
             ],
             "defines": [
-                "_DEBUG",
+                "_NDEBUG",
                 "UNICODE",
                 "_UNICODE"
             ],

@@ -6,9 +6,9 @@ using json = nlohmann::json;
 namespace fs = std::filesystem;
 namespace Mask2Polygon{
 // 常量定义
-const std::string JSON_VERSION = "1.0.2.799";
+const std::string JSON_VERSION = "1.0.2.812";
 const cv::Scalar CONTOUR_COLOR = cv::Scalar(0, 0, 255);  // 红色轮廓
-const int CONTOUR_THICKNESS = 4;  // 轮廓线宽
+const int CONTOUR_THICKNESS = 16;  // 轮廓线宽
 
 /**
  * 从JSON文件加载原始尺寸和缩放尺寸信息

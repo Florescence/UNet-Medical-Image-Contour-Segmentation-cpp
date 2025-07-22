@@ -18,5 +18,6 @@ namespace Mask2Polygon {
     void process_single_mask(const std::string& mask_path,
                             const std::string& output_dir,
                             const std::string& json_path,
-                            const std::string& original_png);
+                            const std::string& original_png,
+                            const std::string& base_name);
 }

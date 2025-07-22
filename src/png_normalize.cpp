@@ -29,29 +29,19 @@ cv::Mat read_and_convert_to_gray(const std::string& img_path) {
 /**
  * 等比例缩放图片（长边=512，短边按比例缩放）
  */
-cv::Mat normalize_image(const cv::Mat& gray_img, int& original_width, int& original_height,
-                       int& scaled_width, int& scaled_height) {  // 输出缩放后的尺寸
-    // 获取原始尺寸
-    original_width = gray_img.cols;
+cv::Mat normalize_image(const cv::Mat& gray_img,
+                        int& original_width, int& original_height,
+                        int& scaled_width, int& scaled_height) {
+    original_width  = gray_img.cols;
     original_height = gray_img.rows;
 
-    // 计算缩放比例（长边缩放到TARGET_LONG_EDGE）
-    const double scale = (original_width >= original_height) 
-        ? static_cast<double>(TARGET_LONG_EDGE) / original_width  // 宽为长边
-        : static_cast<double>(TARGET_LONG_EDGE) / original_height; // 高为长边
+    // 固定输出 512×512
+    scaled_width  = 512;
+    scaled_height = 512;
 
-    // 计算缩放后的尺寸（短边按比例缩放，必然小于等于512）
-    scaled_width = static_cast<int>(original_width * scale);
-    scaled_height = static_cast<int>(original_height * scale);
-
-    // 优化缩放（缩小用INTER_AREA，放大用INTER_LINEAR）
     cv::Mat resized;
-    const int interpolation = (scaled_width < original_width || scaled_height < original_height)
-        ? cv::INTER_AREA
-        : cv::INTER_LINEAR;
-    cv::resize(gray_img, resized, cv::Size(scaled_width, scaled_height), 0, 0, interpolation);
-
-    return resized;  // 直接返回缩放后的图像
+    cv::resize(gray_img, resized, cv::Size(512, 512), 0, 0, cv::INTER_LINEAR);
+    return resized;
 }
 
 /**

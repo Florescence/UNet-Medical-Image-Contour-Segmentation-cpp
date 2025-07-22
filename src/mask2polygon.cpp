@@ -8,7 +8,7 @@ namespace Mask2Polygon{
 // 常量定义
 const std::string JSON_VERSION = "1.0.2.812";
 const cv::Scalar CONTOUR_COLOR = cv::Scalar(0, 0, 255);  // 红色轮廓
-const int CONTOUR_THICKNESS = 16;  // 轮廓线宽
+const int CONTOUR_THICKNESS = 1;  // 轮廓线宽
 
 /**
  * 从JSON文件加载原始尺寸和缩放尺寸信息
@@ -134,15 +134,15 @@ void create_overlay_image(const std::vector<std::vector<cv::Point>>& contours,
 void process_single_mask(const std::string& mask_path,
                         const std::string& output_dir,
                         const std::string& json_path,
-                        const std::string& original_png) {
+                        const std::string& original_png,
+                        const std::string& base_name) {
     try {
         // 1. 提取文件名
-        std::string base_name = fs::path(mask_path).stem().string();
-        std::cout << "Processing Mask: " << fs::path(mask_path).filename() << std::endl;
+        std::cout << "Processing Mask: " << base_name + ".png" << std::endl;
 
         // 2. 加载尺寸信息（新增读取scaled_width/scaled_height）
         json sizes_json = load_size_json(json_path);
-        std::string mask_filename = fs::path(mask_path).filename().string();
+        std::string mask_filename = base_name + ".raw";
         if (!sizes_json.contains(mask_filename)) {
             throw std::runtime_error("Cannot Find Size Info in JSON: " + mask_filename);
         }
@@ -179,26 +179,35 @@ void process_single_mask(const std::string& mask_path,
         }
         std::cout << "Extracted " << contours.size() << " Contours" << std::endl;
 
-        // 6. 计算坐标缩放因子并映射轮廓点
+        // 6. 创建覆盖图（使用映射前的坐标）
+        if (!original_png.empty()) {
+            std::string overlay_path = output_dir + "/" + base_name + "_contour_overlay.png";
+            create_overlay_image(contours, original_png, overlay_path);
+            std::cout << "Overlay Image Saved to: " << overlay_path << std::endl;
+        } else {
+            std::cout << "Warning: Original PNG not provided, skipping overlay generation" << std::endl;
+        }
+
+        // 7. 计算坐标缩放因子并映射轮廓点
         double scale_x = static_cast<double>(original_width) / scaled_width;
         double scale_y = static_cast<double>(original_height) / scaled_height;
         
         std::vector<std::vector<cv::Point>> mapped_contours = 
             map_contour_points(contours, scale_x, scale_y);
 
-        // 7. 生成JSON文件（使用映射后的坐标）
+        // 8. 生成JSON文件（使用映射后的坐标）
         std::string output_json_path = output_dir + "/" + base_name + ".json";
         generate_json(mapped_contours, output_json_path, base_name, original_width, original_height);
         std::cout << "JSON Saved to: " << output_json_path << std::endl;
 
-        // 8. 创建覆盖图（直接使用映射后的坐标）
-        if (!original_png.empty()) {
-            std::string overlay_path = output_dir + "/" + base_name + "_contour_overlay.png";
-            create_overlay_image(mapped_contours, original_png, overlay_path);
-            std::cout << "Overlay Image Saved to: " << overlay_path << std::endl;
-        } else {
-            std::cout << "Warning: Original PNG not provided, skipping overlay generation" << std::endl;
-        }
+        // // 8. 创建覆盖图（直接使用映射后的坐标）
+        // if (!original_png.empty()) {
+        //     std::string overlay_path = output_dir + "/" + base_name + "_contour_overlay.png";
+        //     create_overlay_image(mapped_contours, original_png, overlay_path);
+        //     std::cout << "Overlay Image Saved to: " << overlay_path << std::endl;
+        // } else {
+        //     std::cout << "Warning: Original PNG not provided, skipping overlay generation" << std::endl;
+        // }
 
     } catch (const std::exception& e) {
         std::cerr << "Processing Failure: " << e.what() << std::endl;

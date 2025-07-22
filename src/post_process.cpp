@@ -5,7 +5,7 @@
 const int FOREGROUND_VALUE = 2;       // 前景像素值
 const int BACKGROUND_VALUE_0 = 0;     // 背景像素值0
 const int BACKGROUND_VALUE_1 = 1;     // 背景像素值1
-const int MIN_AREA = 20000;           // 最小连通域面积
+const int MIN_AREA = 512 * 512 * 0.03;           // 最小连通域面积
 const int MORPH_KERNEL_SIZE = 3;      // 形态学操作核大小
 
 /**

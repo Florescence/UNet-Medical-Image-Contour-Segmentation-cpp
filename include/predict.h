@@ -75,4 +75,13 @@ namespace Predict {
             std::string engine_cache_path = "";
         } tensorrt;  // 实例名，避免冲突
     };
+    // TensorRT 推理上下文缓存（线程安全）
+    struct TensorRTContext {
+        std::unique_ptr<nvinfer1::IExecutionContext> context;
+        cudaStream_t stream;
+        void* input_buffer = nullptr;   // 预分配的输入设备内存
+        void* output_buffer = nullptr;  // 预分配的输出设备内存
+        size_t max_input_size = 0;      // 最大输入内存（字节）
+        size_t max_output_size = 0;     // 最大输出内存（字节）
+    };
 }

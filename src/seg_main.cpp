@@ -15,6 +15,7 @@ using namespace std::chrono;
 
 // 日志文件流（全局）
 std::ofstream log_file;
+const std::string trtmodel = "unet_model_3_classes_fp16.trt";
 
 // 自定义日志输出函数
 void log(const std::string& message) {
@@ -149,7 +150,7 @@ int main(int argc, char* argv[]) {
             config.tensorrt.output_name = "output";
             config.tensorrt.max_batch_size = 1;
             config.tensorrt.fp16_mode = true;  // 启用FP16加速
-            config.tensorrt.engine_cache_path = output_dir + "/trt_engine_cache.trt";  // 缓存优化后的引擎
+            config.tensorrt.engine_cache_path = output_dir + "/" + trtmodel;  // 缓存优化后的引擎
         }
 
         // 加载模型（适配新的loadModel函数）
@@ -230,10 +231,12 @@ int main(int argc, char* argv[]) {
         step1_time = duration_cast<milliseconds>(step1_end - step1_start);
         log("Step 1/3: RAW -> 512x512 PNG + JSON - " + std::to_string(step1_time.count()) + " ms");
 
-        // 步骤2: 模型预测（适配新的predict_single_image函数）
+        // 步骤2: 模型预测
         auto step2_start = high_resolution_clock::now();
         const std::string pred_mask_path = pred_mask_dir + "/" + base_name + ".png";
-        Predict::predict_single_image(session, preprocessed_png_path, pred_mask_path, config, log_file);
+        for(int i = 1; i <= 100; i++){
+            Predict::predict_single_image(session, preprocessed_png_path, pred_mask_path, config, log_file);
+        }
         auto step2_end = high_resolution_clock::now();
         step2_time = duration_cast<milliseconds>(step2_end - step2_start);
         log("Step 2/3: Model Inference - " + std::to_string(step2_time.count()) + " ms");

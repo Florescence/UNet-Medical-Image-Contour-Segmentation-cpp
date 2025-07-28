@@ -9,7 +9,8 @@
                 "/utf-8",
                 "/std:c++17",
                 "/MD",
-                "/Fe:\"${workspaceFolder}/bin/seg_main.exe\"",
+                //"/Fe:\"${workspaceFolder}/bin/seg_main.exe\"",
+                "/Fe:\"${workspaceFolder}/bin/main.exe\"",
                 "/Zi",
                 "/EHsc",
                 // 头文件路径
@@ -24,10 +25,14 @@
                 // 源文件
                 // "\"${workspaceFolder}/src/raw2png.cpp\"",
                 // "\"${workspaceFolder}/src/png_normalize.cpp\"",
+                "\"${workspaceFolder}/src/initialize.cpp\"",
                 "\"${workspaceFolder}/src/preprocess.cpp\"",
-                "\"${workspaceFolder}/src/predict.cpp\"",
+                //"\"${workspaceFolder}/src/predict.cpp\"",
                 "\"${workspaceFolder}/src/mask2polygon.cpp\"",
-                "\"${workspaceFolder}/src/seg_main.cpp\"",
+                "\"${workspaceFolder}/src/process.cpp\"",
+                "\"${workspaceFolder}/src/cleanup.cpp\"",
+                //"\"${workspaceFolder}/src/seg_main.cpp\"",
+                "\"${workspaceFolder}/src/main.cpp\"",
                 // 链接选项
                 "/link",
                 "/LIBPATH:\"D:/Program Files/Microsoft.ML.OnnxRuntime.Gpu.1.15.1/runtimes/win-x64/native\"",  // ONNX Runtime库文件

@@ -69,31 +69,35 @@ bool initialize_context(nvinfer1::ICudaEngine* engine, const std::string& input_
         g_context.context = std::unique_ptr<nvinfer1::IExecutionContext>(engine->createExecutionContext());
         nvinfer1::Dims4 fixed_dims(1, 1, 512, 512);  // 固定N=1, C=1, H=512, W=512
         g_context.context->setInputShape(input_name.c_str(), fixed_dims);
-
-        // 3. 创建CUDA流（复用流减少创建开销）
-        cudaStreamCreate(&g_context.stream);
-
-        // 4. 预分配输入内存（基于固定尺寸，一次分配永久复用）
+        
+        // 3. 预分配输入内存（基于固定尺寸，一次分配永久复用）
+        const size_t input_size  = 1 * 1 * 512 * 512 * sizeof(float);
         const int input_idx = engine->getBindingIndex(input_name.c_str());
-        const size_t input_size = 1 * 1 * 512 * 512 * sizeof(float);  // 固定输入大小
-        cudaMalloc(&g_context.input_buffer, input_size);
         g_context.max_input_size = input_size;
+        cudaMalloc(&g_context.input_buffer,  input_size);
 
-        // 5. 获取输出维度并预分配输出内存（基于固定输入尺寸的输出）
+        // 4. 获取输出维度并预分配输出内存（基于固定输入尺寸的输出）
         const int output_idx = engine->getBindingIndex(output_name.c_str());
         nvinfer1::Dims output_dims = g_context.context->getBindingDimensions(output_idx);
         const int num_classes = output_dims.d[1];
         const int output_h = output_dims.d[2];  // 通常与输入同尺寸（512）
         const int output_w = output_dims.d[3];  // 通常与输入同尺寸（512）
         const size_t output_size = num_classes * output_h * output_w * sizeof(float);
-        cudaMalloc(&g_context.output_buffer, output_size);
         g_context.max_output_size = output_size;
+        cudaMalloc(&g_context.output_buffer, output_size);
+
+        // 5. 创建CUDA流（复用流减少创建开销）
+        cudaStreamCreate(&g_context.stream);
+
+        /* --------  关键：先做一次热身推理  -------- */
+        void* buffers[] = {g_context.input_buffer, g_context.output_buffer};
+        g_context.context->enqueueV2(buffers, g_context.stream, nullptr);
+        cudaStreamSynchronize(g_context.stream);
+        /* ----------------------------------------- */
 
         // 6. 启用CUDA Graph优化（记录一次推理流程，永久复用）
         cudaGraph_t graph;
         cudaStreamBeginCapture(g_context.stream, cudaStreamCaptureModeGlobal);
-        // 记录空推理流程（仅含kernel调用，不含数据传输）
-        void* buffers[] = {g_context.input_buffer, g_context.output_buffer};
         g_context.context->enqueueV2(buffers, g_context.stream, nullptr);
         cudaStreamEndCapture(g_context.stream, &graph);
         // 实例化Graph（可多次启动）
@@ -164,7 +168,6 @@ cv::Mat execute_inference(nvinfer1::ICudaEngine* engine, const cv::Mat& gray_img
             class_mask.copyTo(class_idx, update_mask);
         }
         class_idx.copyTo(pred_mask);
-        
         return pred_mask;
     } catch (const std::exception& e) {
         throw std::runtime_error("Inference failed: " + std::string(e.what()));

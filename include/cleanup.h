@@ -1,9 +1,9 @@
-#ifndef CLEANUP_H
-#define CLEANUP_H
+#ifndef ONNX_CLEANUP_H
+#define ONNX_CLEANUP_H
 
 namespace MedicalSeg {
 
-// 清理所有资源并关闭日志
+// 清理ONNX Runtime资源
 void cleanup_resources();
 
 }  // namespace MedicalSeg

@@ -1,28 +1,26 @@
-// initialize.h
 #ifndef INITIALIZE_H
 #define INITIALIZE_H
 
-#include <NvInfer.h>
+#include <onnxruntime_cxx_api.h>
 #include <string>
 #include <fstream>
+#include <memory>
 
 namespace MedicalSeg {
 
-// 初始化TensorRT引擎和日志系统
-bool initialize_engine(const std::string& trt_cache_path, const std::string& log_dir);
+// 初始化ONNX Runtime环境和模型
+bool initialize_onnx_runtime(const std::string& onnx_model_path, const std::string& log_dir);
 
-// 获取全局引擎指针
-nvinfer1::ICudaEngine* get_engine();
+// 获取ONNX Runtime会话
+Ort::Session* get_onnx_session();
 
-// 获取日志文件引用
+// 获取输入/输出节点名称
+const std::vector<std::string>& get_input_names();
+const std::vector<std::string>& get_output_names();
+
+// 日志相关
 std::ofstream& get_log_file();
-
-// 获取日志路径
 std::string get_log_path();
-
-// 外部声明全局资源
-extern std::unique_ptr<nvinfer1::IRuntime> g_runtime;
-extern std::unique_ptr<nvinfer1::ICudaEngine> g_engine;
 
 }  // namespace MedicalSeg
 

@@ -142,11 +142,18 @@ void process_single_mask(const std::string& mask_path,
 
         // 2. 加载尺寸信息（新增读取scaled_width/scaled_height）
         json sizes_json = load_size_json(json_path);
-        std::string mask_filename = base_name + ".raw";
-        if (!sizes_json.contains(mask_filename)) {
-            throw std::runtime_error("Cannot Find Size Info in JSON: " + mask_filename);
+        std::string mask_filename;
+        if (sizes_json.contains(base_name + ".raw")) {
+            mask_filename = base_name + ".raw";
+        }
+        else if (sizes_json.contains(base_name + ".tif")){
+            mask_filename = base_name + ".tif";
+        } 
+        else {
+            throw std::runtime_error("Cannot Find Size Info in JSON: " + base_name + ".raw/.tif");
         }
         
+
         int original_width = sizes_json[mask_filename]["original_width"];
         int original_height = sizes_json[mask_filename]["original_height"];
         int scaled_width = sizes_json[mask_filename]["scaled_width"];
